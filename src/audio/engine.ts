@@ -462,7 +462,7 @@ class AudioEngine {
     const t = ctx.currentTime
     // equal-power crossfade between synthesis and the field recording
     ch.synthGain.gain.setTargetAtTime(Math.cos((r * Math.PI) / 2), t, 0.15)
-    ch.recGain.gain.setTargetAtTime(Math.sin((r * Math.PI) / 2) * 1.1, t, 0.15)
+    ch.recGain.gain.setTargetAtTime(Math.sin((r * Math.PI) / 2) * (SOUND_MAP[ch.soundId]?.recordingGain ?? 1), t, 0.15)
     const url = SOUND_MAP[ch.soundId]?.recording
     if (r > 0.001 && url && !ch.recSource) {
       loadBuffer(ctx, url).then((buf) => {

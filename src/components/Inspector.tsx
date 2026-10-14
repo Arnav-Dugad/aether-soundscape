@@ -165,6 +165,9 @@ function OrbDetail({ orb }: { orb: OrbState }) {
             format={(v) => (v < 0.02 ? 'Synth' : v > 0.98 ? 'Recording' : `${Math.round(v * 100)}% real`)}
           />
         )}
+        {hasRec && orb.realism > 0.02 && def.recordingNote && (
+          <p className="-mt-2 text-[11px] text-amber-100/60">Field recording: {def.recordingNote}</p>
+        )}
       </Section>
 
       <Section title="EQ">

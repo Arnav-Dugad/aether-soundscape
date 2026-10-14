@@ -37,23 +37,42 @@ export interface SoundDef {
   particles?: ParticleKind
   /** URL of a real field recording blended under the synthesis by the orb's "Realism" control. */
   recording?: string
+  /** Where/what the recording is, shown in the inspector. */
+  recordingNote?: string
+  /** Level match so the realism crossfade stays roughly equal-loudness. */
+  recordingGain?: number
 }
 
+/**
+ * Field-recording level trims: RMS of synthesis ÷ RMS of the recording, measured in-browser over
+ * 14 s each, clamped to 0.3–2.5 so sparse synths don't bury dense recordings.
+ */
+const GAIN_RAIN = 0.43
+const GAIN_SHINJUKU = 0.6
+const GAIN_CAFE = 0.47
+const GAIN_OCEAN = 0.89
+const GAIN_BIRDS = 0.3
+const GAIN_FIREPLACE = 2.5
+const GAIN_THUNDER = 1.6
+const GAIN_STREAM = 0.3
+const GAIN_TRAIN = 1
+const GAIN_WIND = 0.9
+
 export const SOUNDS: SoundDef[] = [
-  { id: 'rain', name: 'Rain on Skylight', blurb: 'Droplets tapping a glass roof', category: 'Weather', icon: CloudRain, colors: ['#9ad8ff', '#4f46e5'], anim: 'fall', particles: 'rain', factory: rainSkylight },
-  { id: 'thunder', name: 'Distant Thunder', blurb: 'Rolling storm over the hills', category: 'Weather', icon: CloudLightning, colors: ['#c4b5fd', '#312e81'], anim: 'shake', particles: 'rain', factory: thunder },
-  { id: 'wind', name: 'Wind in Pines', blurb: 'Gusts whistling through needles', category: 'Weather', icon: Wind, colors: ['#a7f3d0', '#0f766e'], anim: 'sway', particles: 'leaves', factory: wind },
-  { id: 'ocean', name: 'Ocean Waves', blurb: 'Swell, crest and foamy backwash', category: 'Nature', icon: WavesHorizontal, colors: ['#67e8f9', '#0369a1'], anim: 'bob', particles: 'bubbles', factory: ocean },
-  { id: 'stream', name: 'Mountain Stream', blurb: 'Bubbling brook over stones', category: 'Nature', icon: Droplets, colors: ['#99f6e4', '#059669'], anim: 'drip', particles: 'bubbles', factory: stream },
-  { id: 'birds', name: 'Forest Dawn', blurb: 'A four-species dawn chorus', category: 'Nature', icon: Bird, colors: ['#d9f99d', '#15803d'], anim: 'flap', particles: 'leaves', factory: birds },
+  { id: 'rain', name: 'Rain on Skylight', blurb: 'Droplets tapping a glass roof', category: 'Weather', icon: CloudRain, colors: ['#9ad8ff', '#4f46e5'], anim: 'fall', particles: 'rain', recording: '/recordings/rain.mp3', recordingNote: 'Rain on a tent · Netherlands', recordingGain: GAIN_RAIN, factory: rainSkylight },
+  { id: 'thunder', name: 'Distant Thunder', blurb: 'Rolling storm over the hills', category: 'Weather', icon: CloudLightning, colors: ['#c4b5fd', '#312e81'], anim: 'shake', particles: 'rain', recording: '/recordings/thunder.mp3', recordingNote: 'Summer thunderstorm', recordingGain: GAIN_THUNDER, factory: thunder },
+  { id: 'wind', name: 'Wind in Pines', blurb: 'Gusts whistling through needles', category: 'Weather', icon: Wind, colors: ['#a7f3d0', '#0f766e'], anim: 'sway', particles: 'leaves', recording: '/recordings/wind.mp3', recordingNote: 'Storm Floris · Killiney Hill, Ireland', recordingGain: GAIN_WIND, factory: wind },
+  { id: 'ocean', name: 'Ocean Waves', blurb: 'Swell, crest and foamy backwash', category: 'Nature', icon: WavesHorizontal, colors: ['#67e8f9', '#0369a1'], anim: 'bob', particles: 'bubbles', recording: '/recordings/ocean.mp3', recordingNote: 'Waves at Røsnæs · Denmark', recordingGain: GAIN_OCEAN, factory: ocean },
+  { id: 'stream', name: 'Mountain Stream', blurb: 'Bubbling brook over stones', category: 'Nature', icon: Droplets, colors: ['#99f6e4', '#059669'], anim: 'drip', particles: 'bubbles', recording: '/recordings/stream.mp3', recordingNote: 'Stream, up close', recordingGain: GAIN_STREAM, factory: stream },
+  { id: 'birds', name: 'Forest Dawn', blurb: 'A four-species dawn chorus', category: 'Nature', icon: Bird, colors: ['#d9f99d', '#15803d'], anim: 'flap', particles: 'leaves', recording: '/recordings/birds.mp3', recordingNote: 'Dawn chorus · West Dorset, UK', recordingGain: GAIN_BIRDS, factory: birds },
   { id: 'crickets', name: 'Summer Crickets', blurb: 'Pulsing field chorus & katydids', category: 'Nature', icon: Bug, colors: ['#fef08a', '#4d7c0f'], anim: 'tap', particles: 'sparkles', factory: crickets },
   { id: 'drips', name: 'Cave Drips', blurb: 'Resonant drops in a grotto', category: 'Nature', icon: Droplet, colors: ['#bfdbfe', '#334155'], anim: 'drip', particles: 'bubbles', factory: drips },
   { id: 'underwater', name: 'Abyss', blurb: 'Pressure, bubbles & sonar', category: 'Nature', icon: Fish, colors: ['#7dd3fc', '#1e3a8a'], anim: 'bob', particles: 'bubbles', factory: underwater },
-  { id: 'shinjuku', name: 'Midnight Shinjuku', blurb: 'Wet streets, neon & crossings', category: 'Urban', icon: Building, colors: ['#f9a8d4', '#7e22ce'], anim: 'pulse', particles: 'rain', factory: shinjuku },
-  { id: 'train', name: 'Night Train', blurb: 'Clickety-clack through the dark', category: 'Urban', icon: TrainFront, colors: ['#fdba74', '#9a3412'], anim: 'shake', particles: 'dust', factory: nightTrain },
-  { id: 'cafe', name: 'Café Murmur', blurb: 'Conversations & clinking cups', category: 'Urban', icon: Users, colors: ['#fde68a', '#b45309'], anim: 'bob', particles: 'steam', factory: cafe },
+  { id: 'shinjuku', name: 'Midnight Shinjuku', blurb: 'Wet streets, neon & crossings', category: 'Urban', icon: Building, colors: ['#f9a8d4', '#7e22ce'], anim: 'pulse', particles: 'rain', recording: '/recordings/shinjuku.mp3', recordingNote: 'Rainy street · Kelowna, Canada', recordingGain: GAIN_SHINJUKU, factory: shinjuku },
+  { id: 'train', name: 'Night Train', blurb: 'Clickety-clack through the dark', category: 'Urban', icon: TrainFront, colors: ['#fdba74', '#9a3412'], anim: 'shake', particles: 'dust', recording: '/recordings/train.mp3', recordingNote: 'Chūō Line · Tokyo', recordingGain: GAIN_TRAIN, factory: nightTrain },
+  { id: 'cafe', name: 'Café Murmur', blurb: 'Conversations & clinking cups', category: 'Urban', icon: Users, colors: ['#fde68a', '#b45309'], anim: 'bob', particles: 'steam', recording: '/recordings/cafe.mp3', recordingNote: 'Restaurant ambience', recordingGain: GAIN_CAFE, factory: cafe },
   { id: 'espresso', name: 'Espresso Machine', blurb: 'Grind, tamp, pour, steam', category: 'Interior', icon: Coffee, colors: ['#e7c6a0', '#7c2d12'], anim: 'shake', particles: 'steam', factory: espresso },
-  { id: 'fireplace', name: 'Fireplace', blurb: 'Crackling logs & sap pops', category: 'Interior', icon: Flame, colors: ['#fdba74', '#dc2626'], anim: 'flicker', particles: 'embers', factory: fireplace },
+  { id: 'fireplace', name: 'Fireplace', blurb: 'Crackling logs & sap pops', category: 'Interior', icon: Flame, colors: ['#fdba74', '#dc2626'], anim: 'flicker', particles: 'embers', recording: '/recordings/fireplace.mp3', recordingNote: 'Campfire', recordingGain: GAIN_FIREPLACE, factory: fireplace },
   { id: 'typing', name: 'Mechanical Keys', blurb: 'Thocky switches, late-night prose', category: 'Interior', icon: Keyboard, colors: ['#e2e8f0', '#475569'], anim: 'tap', factory: typing },
   { id: 'clock', name: 'Grandfather Clock', blurb: 'Tick, tock and a far chime', category: 'Interior', icon: Clock, colors: ['#fde047', '#a16207'], anim: 'tick', factory: clock },
   { id: 'vinyl', name: 'Vinyl Crackle', blurb: 'Dusty grooves at 33⅓ rpm', category: 'Texture', icon: Disc3, colors: ['#fbcfe8', '#be185d'], anim: 'spin', particles: 'dust', factory: vinyl },

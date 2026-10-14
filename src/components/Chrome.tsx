@@ -2,6 +2,7 @@ import { AnimatePresence, motion } from 'framer-motion'
 import { ArrowRight, Check, Circle, Headphones, HelpCircle, Maximize2, Minimize2, X } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { SOUNDS } from '../audio/catalog'
+import { CREDITS } from '../audio/credits'
 import { useStore } from '../store'
 import { Glass, IconButton, Kbd, spring } from './ui'
 
@@ -281,6 +282,29 @@ export function HelpSheet() {
               Mouse: scroll over an orb for volume, ⇧-scroll for height, double-click to mute. Drag empty space to lasso (⇧ adds).
               Touch: pinch to zoom, twist two fingers to turn your head.
             </p>
+            <h3 className="mb-2 mt-7 text-[11px] font-semibold uppercase tracking-[0.16em] text-white/40">Field recording credits</h3>
+            <p className="mb-3 text-[12px] leading-relaxed text-white/45">
+              Every sound is synthesised live. The optional “Realism” blend uses these field recordings, each trimmed, looped,
+              loudness-normalised and re-encoded.
+            </p>
+            <ul className="flex flex-col gap-1.5 text-[11.5px] leading-snug text-white/60">
+              {CREDITS.map((c) => (
+                <li key={c.sound}>
+                  <span className="text-white/80">{c.sound}:</span>{' '}
+                  <a href={c.source} target="_blank" rel="noreferrer" className="underline decoration-white/25 underline-offset-2 hover:text-white">
+                    “{c.title}”
+                  </a>{' '}
+                  by {c.author},{' '}
+                  {c.licenseUrl ? (
+                    <a href={c.licenseUrl} target="_blank" rel="noreferrer" className="underline decoration-white/25 underline-offset-2 hover:text-white">
+                      {c.license}
+                    </a>
+                  ) : (
+                    c.license
+                  )}
+                </li>
+              ))}
+            </ul>
           </Glass>
         </motion.div>
       )}
