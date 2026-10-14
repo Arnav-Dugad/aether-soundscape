@@ -3,8 +3,10 @@ import { useEffect, useState } from 'react'
 import { engine } from './audio/engine'
 import { startAudioSync } from './audio/sync'
 import { SCENES } from './audio/scenes'
-import { useStore } from './store'
+import { useStore, type Snapshot } from './store'
 import { runtime } from './runtime'
+import { redo, startHistory, undo } from './history'
+import { restoreImports } from './lib/imports'
 import { decodeMix, loadLocal } from './lib/share'
 import { MeshBackground } from './components/MeshBackground'
 import { Stage } from './components/Stage'
@@ -12,6 +14,10 @@ import { Library } from './components/Library'
 import { Inspector } from './components/Inspector'
 import { Dock } from './components/Dock'
 import { HelpSheet, Intro, Toasts, TopBar } from './components/Chrome'
+import { Composer } from './components/Composer'
+import { SettingsSheet } from './components/Settings'
+import { maybeStartTour, Tour } from './components/Tour'
+import { RefractionDefs } from './components/Refraction'
 import { Glass, IconButton } from './components/ui'
 import { X } from 'lucide-react'
 
@@ -29,17 +35,26 @@ function useCompact() {
 
 async function enter() {
   await engine.start()
+  await restoreImports()
   startAudioSync()
   const st = useStore.getState()
+  try {
+    const snaps = JSON.parse(localStorage.getItem('aether:snapshots:v1') ?? '[]') as Snapshot[]
+    if (Array.isArray(snaps)) st.set('snapshots', snaps)
+  } catch {
+    /* ignore corrupt snapshots */
+  }
   const hash = location.hash.startsWith('#mix=') ? decodeMix(location.hash.slice(5)) : null
   const local = !hash ? decodeMix(loadLocal() ?? '') : null
   const mix = hash ?? local
   if (mix && mix.orbs.length) {
-    st.loadMix(mix.orbs, mix.palette)
+    st.loadMix(mix.orbs, { palette: mix.palette, walls: mix.walls, room: mix.room })
     if (hash) st.toast('Loaded a shared soundscape', 'success')
   } else st.loadScene(SCENES[0])
   st.setStarted()
   st.setPlaying(true)
+  startHistory()
+  maybeStartTour()
 }
 
 export default function App() {
@@ -52,6 +67,7 @@ export default function App() {
 
   return (
     <>
+      <RefractionDefs />
       <MeshBackground />
       <AnimatePresence>
         {started && (
@@ -70,6 +86,7 @@ export default function App() {
                   animate={{ x: 0, opacity: 1 }}
                   transition={{ type: 'spring', stiffness: 120, damping: 20, delay: 0.15 }}
                   className="w-[280px] shrink-0 overflow-hidden rounded-[36px] xl:w-[310px]"
+                  data-tour="library"
                 >
                   <Library />
                 </Glass>
@@ -83,6 +100,7 @@ export default function App() {
                   animate={{ x: 0, opacity: 1 }}
                   transition={{ type: 'spring', stiffness: 120, damping: 20, delay: 0.2 }}
                   className="w-[290px] shrink-0 overflow-hidden rounded-[36px] xl:w-[320px]"
+                  data-tour="inspector"
                 >
                   <Inspector />
                 </Glass>
@@ -110,6 +128,9 @@ export default function App() {
       <AnimatePresence>{!started && <Intro key="intro" onEnter={enter} />}</AnimatePresence>
       <Toasts />
       <HelpSheet />
+      <Composer />
+      <SettingsSheet />
+      <Tour />
     </>
   )
 }
@@ -148,9 +169,27 @@ function useKeyboard() {
     const onKey = (e: KeyboardEvent) => {
       const tgt = e.target as HTMLElement
       if (tgt.closest('input, textarea, [contenteditable]')) return
-      if (e.metaKey || e.ctrlKey || e.altKey) return
       const st = useStore.getState()
       if (!st.started) return
+      if ((e.metaKey || e.ctrlKey) && (e.key === 'z' || e.key === 'Z')) {
+        e.preventDefault()
+        if (e.shiftKey) redo()
+        else undo()
+        return
+      }
+      if ((e.metaKey || e.ctrlKey) && e.key === 'y') {
+        e.preventDefault()
+        redo()
+        return
+      }
+      if (e.metaKey || e.ctrlKey || e.altKey) return
+      if (st.composerOpen || st.settingsOpen || st.tourStep !== null) {
+        if (e.key === 'Escape') {
+          st.set('composerOpen', false)
+          st.set('settingsOpen', false)
+        }
+        return
+      }
       const sel = st.orbs.find((o) => o.id === st.selectedId)
       const k = e.key
       if (k === ' ') {
@@ -159,19 +198,34 @@ function useKeyboard() {
         st.setPlaying(!st.playing)
       } else if (k === 'Escape') {
         if (st.helpOpen) st.set('helpOpen', false)
+        else if (st.drawPathFor) st.set('drawPathFor', null)
         else st.select(null)
       } else if (k === '?') st.set('helpOpen', !st.helpOpen)
       else if (k === 'o' || k === 'O') {
         st.set('orbit', !st.orbit)
         st.toast(st.orbit ? 'Orbit motion off' : 'Orbit motion on — ringed orbs now circle you')
       } else if (k === 's' || k === 'S') st.scatter()
-      else if (/^[1-8]$/.test(k)) {
-        const scene = SCENES[Number(k) - 1]
+      else if (/^[0-9]$/.test(k)) {
+        const scene = SCENES[k === '0' ? 9 : Number(k) - 1]
+        if (!scene) return
         st.loadScene(scene)
         st.setPlaying(true)
         st.toast(scene.name)
       } else if (k === '[' || k === ']') st.set('heading', st.heading + (k === '[' ? -Math.PI / 12 : Math.PI / 12))
-      else if (sel && (k === 'Delete' || k === 'Backspace')) st.removeOrb(sel.id)
+      else if (k === 'a' || k === 'A') st.set('composerOpen', true)
+      else if (k === 'w' || k === 'W') st.addWall()
+      else if (k === 'b' || k === 'B') st.set('breathe', !st.breathe)
+      else if (k === 't' || k === 'T') st.set('tilt', !st.tilt)
+      else if (k === 'p' || k === 'P') {
+        if (sel) st.set('drawPathFor', sel.id)
+      } else if (k === 'g' || k === 'G') {
+        if (st.multi.length > 1) st.groupSelected()
+      } else if (k === '=' || k === '+') st.set('zoom', Math.min(1.6, st.zoom * 1.1))
+      else if (k === '-' || k === '_') st.set('zoom', Math.max(0.6, st.zoom / 1.1))
+      else if (k === 'PageUp' || k === 'PageDown') {
+        if (sel) st.updateOrb(sel.id, { z: Math.max(-1, Math.min(1, sel.z + (k === 'PageUp' ? 0.1 : -0.1))) })
+      } else if (st.selectedWallId && (k === 'Delete' || k === 'Backspace')) st.removeWall(st.selectedWallId)
+      else if (sel && (k === 'Delete' || k === 'Backspace')) st.removeSelected()
       else if (sel && (k === 'm' || k === 'M')) st.updateOrb(sel.id, { muted: !sel.muted })
       else if (sel && (k === 'd' || k === 'D')) st.duplicateOrb(sel.id)
       else if (sel && k.startsWith('Arrow')) {

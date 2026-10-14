@@ -13,6 +13,7 @@ precision highp float;
 uniform vec2 uRes;
 uniform float uTime;
 uniform float uLevel;
+uniform vec3 uBands;
 uniform vec3 uC0, uC1, uC2, uC3;
 
 vec3 mod289(vec3 x){ return x - floor(x * (1.0/289.0)) * 289.0; }
@@ -49,13 +50,16 @@ void main(){
 
   // domain warp
   vec2 w = vec2(snoise(p * 1.1 + t), snoise(p * 1.1 - t + 4.3));
-  vec2 q = p + w * (0.32 + uLevel * 0.25);
+  // bass swells the warp, mids push the colour wells, highs add shimmer
+  vec2 q = p + w * (0.32 + uLevel * 0.15 + uBands.x * 0.35);
 
   // four drifting colour wells
   vec2 a = vec2(0.25 * aspect + 0.18 * sin(t * 1.3), 0.25 + 0.15 * cos(t * 1.1));
   vec2 b = vec2(0.80 * aspect + 0.15 * cos(t * 0.9), 0.30 + 0.20 * sin(t * 1.7));
   vec2 c = vec2(0.70 * aspect + 0.20 * sin(t * 1.2 + 2.0), 0.85 + 0.10 * cos(t));
   vec2 d = vec2(0.20 * aspect + 0.12 * cos(t * 1.5 + 1.0), 0.80 + 0.12 * sin(t * 0.8));
+  a += vec2(uBands.y * 0.08, -uBands.y * 0.05);
+  c -= vec2(uBands.y * 0.06, uBands.y * 0.04);
   float wa = 1.0 / pow(distance(q, a) + 0.08, 2.4);
   float wb = 1.0 / pow(distance(q, b) + 0.08, 2.4);
   float wc = 1.0 / pow(distance(q, c) + 0.08, 2.4);
@@ -65,6 +69,11 @@ void main(){
   // soft luminous caustic band
   float band = smoothstep(0.0, 0.9, snoise(q * 2.2 + t * 2.0) * 0.5 + 0.5);
   col += band * 0.05 * (1.0 + uLevel * 2.0);
+  // high-frequency sparkle
+  float spark = pow(max(0.0, snoise(q * 9.0 + uTime * 0.6)), 6.0);
+  col += spark * uBands.z * 0.35;
+  // low-end bloom from the centre
+  col *= 1.0 + uBands.x * 0.12 * smoothstep(0.9, 0.0, length(uv - 0.5));
 
   // vignette + overall darkening so glass reads well
   float vig = smoothstep(1.25, 0.25, length((uv - 0.5) * vec2(aspect, 1.0)));
@@ -109,6 +118,8 @@ export function MeshBackground() {
     const uRes = gl.getUniformLocation(prog, 'uRes')
     const uTime = gl.getUniformLocation(prog, 'uTime')
     const uLevel = gl.getUniformLocation(prog, 'uLevel')
+    const uBands = gl.getUniformLocation(prog, 'uBands')
+    const bands = [0, 0, 0]
     const uC = [0, 1, 2, 3].map((i) => gl.getUniformLocation(prog, `uC${i}`))
 
     // render at reduced resolution: the gradient is soft, so this is free quality-wise
@@ -141,6 +152,11 @@ export function MeshBackground() {
       gl.uniform2f(uRes, canvas.width, canvas.height)
       gl.uniform1f(uTime, time)
       gl.uniform1f(uLevel, level)
+      const src = engine.started ? engine.bands : { low: 0, mid: 0, high: 0 }
+      bands[0] += (src.low - bands[0]) * 0.08
+      bands[1] += (src.mid - bands[1]) * 0.08
+      bands[2] += (src.high - bands[2]) * 0.08
+      gl.uniform3f(uBands, bands[0], bands[1], bands[2])
       uC.forEach((u, i) => gl.uniform3fv(u, current[i]))
       gl.drawArrays(gl.TRIANGLES, 0, 3)
     }

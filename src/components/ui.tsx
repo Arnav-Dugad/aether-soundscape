@@ -146,3 +146,47 @@ export function Kbd({ children }: { children: ReactNode }) {
     </kbd>
   )
 }
+
+/** iOS-style toggle switch. */
+export function Switch({ checked, onChange, label, hint }: { checked: boolean; onChange: (v: boolean) => void; label: string; hint?: string }) {
+  return (
+    <button
+      role="switch"
+      aria-checked={checked}
+      onClick={() => onChange(!checked)}
+      className="flex w-full items-center justify-between gap-4 rounded-[16px] px-1 py-1.5 text-left"
+    >
+      <span>
+        <span className="block text-[13px] font-medium text-white/90">{label}</span>
+        {hint && <span className="block text-[11.5px] leading-snug text-white/45">{hint}</span>}
+      </span>
+      <span className={cx('relative h-[26px] w-[44px] shrink-0 rounded-full transition-colors duration-300', checked ? 'bg-emerald-400/90' : 'bg-white/15')}>
+        <motion.span
+          className="absolute top-[3px] h-5 w-5 rounded-full bg-white shadow-[0_2px_6px_rgba(0,0,0,.35)]"
+          animate={{ left: checked ? 21 : 3 }}
+          transition={spring}
+        />
+      </span>
+    </button>
+  )
+}
+
+/** Segmented control with a sliding glass thumb. */
+export function Segmented<T extends string>({
+  value, options, onChange, id,
+}: { value: T; options: { value: T; label: ReactNode }[]; onChange: (v: T) => void; id: string }) {
+  return (
+    <div className="flex rounded-full bg-white/[0.07] p-1 ring-1 ring-white/10">
+      {options.map((o) => (
+        <button
+          key={o.value}
+          onClick={() => onChange(o.value)}
+          className={cx('relative flex-1 rounded-full px-3 py-1.5 text-[12px] font-medium transition-colors', value === o.value ? 'text-black' : 'text-white/60 hover:text-white')}
+        >
+          {value === o.value && <motion.span layoutId={`seg-${id}`} className="absolute inset-0 rounded-full bg-white" transition={spring} />}
+          <span className="relative flex items-center justify-center gap-1.5">{o.label}</span>
+        </button>
+      ))}
+    </div>
+  )
+}

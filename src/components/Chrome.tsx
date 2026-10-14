@@ -201,14 +201,23 @@ export function Toasts() {
 
 const SHORTCUTS: [string[], string][] = [
   [['Space'], 'Play / pause'],
-  [['1', '–', '8'], 'Load a scene'],
+  [['1', '–', '0'], 'Load a scene'],
+  [['A'], 'AI Composer'],
+  [['⌘', 'Z'], 'Undo  ·  ⇧⌘Z redo'],
   [['O'], 'Toggle orbit motion'],
   [['S'], 'Surprise me — random constellation'],
+  [['W'], 'Add a wall'],
+  [['P'], 'Draw a path for the selected orb'],
+  [['G'], 'Group the selection'],
+  [['B'], 'Breathing mode'],
+  [['T'], '3D tilt view'],
+  [['+', '−'], 'Zoom the field'],
   [['←', '↑', '→', '↓'], 'Nudge selected orb (⇧ for more)'],
+  [['PgUp', 'PgDn'], 'Raise / lower selected orb'],
   [['[', ']'], 'Turn your head'],
   [['M'], 'Mute selected'],
   [['D'], 'Duplicate selected'],
-  [['⌫'], 'Remove selected'],
+  [['⌫'], 'Remove selection / wall'],
   [['Esc'], 'Deselect'],
 ]
 
@@ -247,7 +256,9 @@ export function HelpSheet() {
                 ['Distance', 'Closer is louder and drier. Far sources lose treble to the air and bloom into the hall.'],
                 ['Direction', 'HRTF binaural panning places each sound left, right, in front of or behind you.'],
                 ['Orbital rings', 'Release near a ring and the orb snaps on magnetically. Turn on Orbit and ringed orbs circle you.'],
-                ['Your head', 'Drag the centre node to turn and hear the whole field rotate around you.'],
+                ['Your head', 'Drag the centre node to turn — or enable webcam / motion head tracking in Settings.'],
+                ['Walls & paths', 'Walls muffle what is behind them. Draw a loop and an orb will travel it forever.'],
+                ['Snapshots', 'Save mixes and morph between them over seconds or minutes. Every edit is undoable.'],
               ].map(([t, d]) => (
                 <div key={t} className="rounded-[22px] bg-white/[0.05] p-4 ring-1 ring-white/[0.07]">
                   <div className="text-[13px] font-semibold text-white">{t}</div>
@@ -266,7 +277,10 @@ export function HelpSheet() {
                 </li>
               ))}
             </ul>
-            <p className="mt-5 text-[12px] text-white/40">Mouse: scroll over an orb to change its volume · double-click to mute it.</p>
+            <p className="mt-5 text-[12px] leading-relaxed text-white/40">
+              Mouse: scroll over an orb for volume, ⇧-scroll for height, double-click to mute. Drag empty space to lasso (⇧ adds).
+              Touch: pinch to zoom, twist two fingers to turn your head.
+            </p>
           </Glass>
         </motion.div>
       )}

@@ -1,8 +1,9 @@
 import { AnimatePresence, LayoutGroup, motion } from 'framer-motion'
-import { Plus, Search, X } from 'lucide-react'
+import { Plus, Search, Upload, X } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { CATEGORIES, SOUNDS, type Category, type SoundDef } from '../audio/catalog'
 import { useStore } from '../store'
+import { pickAudioFile } from '../lib/imports'
 import { cx, spring } from './ui'
 
 export function Library({ onPicked }: { onPicked?: () => void }) {
@@ -15,6 +16,7 @@ export function Library({ onPicked }: { onPicked?: () => void }) {
   })
   const inMix = useMemo(() => JSON.parse(counts) as Record<string, number>, [counts])
 
+  const custom = useStore((s) => s.customSounds.length)
   const list = useMemo(() => {
     const q = query.trim().toLowerCase()
     return SOUNDS.filter(
@@ -22,14 +24,25 @@ export function Library({ onPicked }: { onPicked?: () => void }) {
         (cat === 'All' || s.category === cat) &&
         (!q || s.name.toLowerCase().includes(q) || s.blurb.toLowerCase().includes(q) || s.category.toLowerCase().includes(q)),
     )
-  }, [query, cat])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [query, cat, custom])
 
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div className="px-5 pb-3 pt-5">
         <div className="flex items-baseline justify-between">
           <h2 className="text-[17px] font-semibold tracking-tight text-white">Sound Library</h2>
-          <span className="text-[11px] tabular-nums text-white/40">{SOUNDS.length} generators</span>
+          <span className="flex items-center gap-2">
+            <span className="text-[11px] tabular-nums text-white/40">{SOUNDS.length} sounds</span>
+            <button
+              onClick={pickAudioFile}
+              aria-label="Import audio"
+              className="group relative grid h-7 w-7 place-items-center rounded-full bg-white/[0.08] text-white/70 hover:bg-white hover:text-black"
+            >
+              <Upload size={13} />
+              <span className="tooltip">Import your own audio</span>
+            </button>
+          </span>
         </div>
         <p className="mt-0.5 text-[12px] text-white/45">Every sound is synthesised live in your browser.</p>
         <label className="mt-4 flex h-10 items-center gap-2 rounded-2xl bg-white/[0.07] px-3 shadow-[inset_0_1px_1px_rgba(0,0,0,.25)] ring-1 ring-white/10 focus-within:ring-white/30">
@@ -49,7 +62,7 @@ export function Library({ onPicked }: { onPicked?: () => void }) {
         </label>
         <LayoutGroup id="cats">
           <div className="no-scrollbar -mx-1 mt-3 flex gap-1 overflow-x-auto px-1 pb-1">
-            {(['All', ...CATEGORIES] as const).map((c) => (
+            {(['All', ...CATEGORIES.filter((c) => c !== 'Imported' || custom > 0)] as const).map((c) => (
               <button
                 key={c}
                 onClick={() => setCat(c)}

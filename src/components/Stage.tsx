@@ -1,14 +1,22 @@
-import { AnimatePresence, animate, motion, useMotionValue, useTransform } from 'framer-motion'
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { AnimatePresence, motion, useMotionValue, useSpring } from 'framer-motion'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { engine, WORLD_RADIUS } from '../audio/engine'
 import { SOUND_MAP } from '../audio/catalog'
-import { RING_NAMES, RINGS, useStore } from '../store'
+import { RINGS, useStore, type OrbState } from '../store'
 import { field, runtime } from '../runtime'
+import { morph } from '../morph'
+import { silently } from '../history'
+import { inPolygon, resampleLoop, sampleLoop, segmentsIntersect, type Pt } from '../lib/geometry'
+import { Particles } from '../lib/particles'
+import { haptic } from '../lib/haptics'
 import { Orb, ringAt } from './Orb'
-import { Glass, cx } from './ui'
+import { FieldGrid, Listener, PathsOverlay, Walls } from './Field'
+import { Glass } from './ui'
 
 /** Angular velocity (rad/s) of each ring in orbit mode — inner rings orbit faster, like planets. */
 const ORBIT_SPEED = [0.24, 0.13, 0.075]
+const GROUP_ORBIT_SPEED = 0.12
+const BREATH_PERIOD = 10 // 6 breaths per minute
 
 interface Ripple {
   x: number
@@ -22,19 +30,35 @@ export function Stage() {
   const wrapRef = useRef<HTMLDivElement>(null)
   const trailRef = useRef<HTMLCanvasElement>(null)
   const fxRef = useRef<HTMLCanvasElement>(null)
-  const [dims, setDims] = useState({ w: 800, h: 600, r: 260 })
+  const breathTextRef = useRef<HTMLDivElement>(null)
+  const [dims, setDims] = useState({ w: 800, h: 600, base: 260 })
   const orbs = useStore((s) => s.orbs)
   const magnet = useStore((s) => s.magnetRing)
+  const zoom = useStore((s) => s.zoom)
+  const tilt = useStore((s) => s.tilt)
+  const breathe = useStore((s) => s.breathe)
+  const drawPathFor = useStore((s) => s.drawPathFor)
   const [dropHover, setDropHover] = useState(false)
+  const [drawing, setDrawing] = useState<Pt[] | null>(null)
+  const [lasso, setLasso] = useState<Pt[] | null>(null)
+  const r = Math.round(dims.base * zoom)
 
-  // measure the stage and size the canvases for the device pixel ratio
+  // breathing scale + 3D tilt live on the field layer
+  const breathMV = useMotionValue(1)
+  const rotX = useSpring(0, { stiffness: 120, damping: 20 })
+  const rotY = useSpring(0, { stiffness: 120, damping: 20 })
+  useEffect(() => {
+    rotX.set(tilt ? 24 : 0)
+    rotY.set(0)
+  }, [tilt, rotX, rotY])
+
   useEffect(() => {
     const el = wrapRef.current!
     const ro = new ResizeObserver(() => {
       const w = el.clientWidth
       const h = el.clientHeight
-      const r = Math.max(110, Math.min(w, h) / 2 - (w < 640 ? 46 : 64))
-      setDims({ w, h, r })
+      const base = Math.max(110, Math.min(w, h) / 2 - (w < 640 ? 46 : 64))
+      setDims({ w, h, base })
       const dpr = Math.min(2, devicePixelRatio || 1)
       for (const c of [trailRef.current!, fxRef.current!]) {
         c.width = w * dpr
@@ -49,30 +73,60 @@ export function Stage() {
   // publish the radius in the same commit in which orbs re-lay themselves out (both are
   // layout effects), so the frame loop never sees a new radius with old pixel positions
   useLayoutEffect(() => {
-    field.radius = dims.r
-  }, [dims.r])
+    field.radius = r
+  }, [r])
 
-  // the single animation loop: orbit motion, audio positions, pulsing, trails, beams, ripples
+  /** Client coordinates → normalised field coordinates (accounts for the breathing scale). */
+  const toNorm = useCallback(
+    (clientX: number, clientY: number): Pt => {
+      const rect = wrapRef.current!.getBoundingClientRect()
+      const s = field.radius * field.breath
+      return [(clientX - rect.left - rect.width / 2) / s, (clientY - rect.top - rect.height / 2) / s]
+    },
+    [],
+  )
+
+  // ─── the single animation loop ──────────────────────────────────────────────
   useEffect(() => {
     const trail = trailRef.current!.getContext('2d')!
     const fx = fxRef.current!.getContext('2d')!
     const ripples: Ripple[] = []
+    const particles = new Particles()
     const lastLevel = new Map<string, number>()
     let raf = 0
     let last = performance.now()
     let commitTimer = 0
+    let lastBreathWord = ''
     const frame = (now: number) => {
       raf = requestAnimationFrame(frame)
       const dt = Math.min(0.05, (now - last) / 1000)
       last = now
-      const { w, h } = { w: wrapRef.current!.clientWidth, h: wrapRef.current!.clientHeight }
+      const wrap = wrapRef.current
+      if (!wrap) return
+      const w = wrap.clientWidth
+      const h = wrap.clientHeight
       const cx0 = w / 2
       const cy0 = h / 2
       const R = field.radius
+      morph.step(now)
       const st = useStore.getState()
       const playing = st.playing
+      const t = now / 1000
 
-      // fade trails
+      // breathing: the whole field swells on the inhale and settles on the exhale
+      let b = 0
+      if (st.breathe) {
+        b = Math.sin((2 * Math.PI * t) / BREATH_PERIOD)
+        field.breath = 1 + 0.07 * b
+        const word = Math.cos((2 * Math.PI * t) / BREATH_PERIOD) > 0 ? 'Breathe in' : 'Breathe out'
+        if (word !== lastBreathWord && breathTextRef.current) {
+          lastBreathWord = word
+          breathTextRef.current.textContent = word
+        }
+      } else field.breath += (1 - field.breath) * 0.08
+      breathMV.set(field.breath)
+      const audioBreath = 1 + (field.breath - 1) * 3
+
       trail.globalCompositeOperation = 'destination-out'
       trail.fillStyle = 'rgba(0,0,0,0.06)'
       trail.fillRect(0, 0, w, h)
@@ -80,21 +134,57 @@ export function Stage() {
       fx.clearRect(0, 0, w, h)
 
       const master = engine.started ? engine.readMasterLevel() : 0
-      const t = now / 1000
+      const byId = new Map<string, OrbState>(st.orbs.map((o) => [o.id, o]))
+      const ringEnergy = [0, 0, 0]
+      let moved = false
 
       for (const rt of runtime.values()) {
-        // orbit mode: ring-locked orbs circle the listener
-        if (st.orbit && playing && !rt.dragging && !rt.animating && rt.ring !== null) {
-          const ang = Math.atan2(rt.my.get(), rt.mx.get()) + ORBIT_SPEED[rt.ring] * st.orbitSpeed * dt
-          const rr = RINGS[rt.ring] * R
-          rt.mx.set(Math.cos(ang) * rr)
-          rt.my.set(Math.sin(ang) * rr)
+        const orb = byId.get(rt.id)
+        if (!orb) continue
+        const owned = morph.owns(rt.id)
+        if (!rt.dragging && !rt.animating && !owned && playing) {
+          if (orb.path && orb.path.pts.length > 3) {
+            // follow the drawn loop at constant speed
+            rt.pathT += (dt * orb.path.speed) / 60
+            const [px, py] = sampleLoop(orb.path.pts, rt.pathT)
+            rt.mx.set(px * R)
+            rt.my.set(py * R)
+            moved = true
+          } else if (orb.groupId && st.groups[orb.groupId]?.orbit) {
+            const a = GROUP_ORBIT_SPEED * st.orbitSpeed * dt
+            const x = rt.mx.get()
+            const y = rt.my.get()
+            rt.mx.set(x * Math.cos(a) - y * Math.sin(a))
+            rt.my.set(x * Math.sin(a) + y * Math.cos(a))
+            moved = true
+          } else if (st.orbit && rt.ring !== null && !orb.groupId) {
+            const ang = Math.atan2(rt.my.get(), rt.mx.get()) + ORBIT_SPEED[rt.ring] * st.orbitSpeed * dt
+            const rr = RINGS[rt.ring] * R
+            rt.mx.set(Math.cos(ang) * rr)
+            rt.my.set(Math.sin(ang) * rr)
+            moved = true
+          }
         }
         const x = rt.mx.get()
         const y = rt.my.get()
         rt.nx = x / R
         rt.ny = y / R
-        engine.setPosition(rt.id, rt.nx, rt.ny)
+        if (!owned) rt.nz = orb.z
+        engine.setPosition(rt.id, rt.nx * audioBreath, rt.ny * audioBreath, rt.nz)
+
+        // occlusion: does any wall cut the line between this orb and the listener?
+        let occ = false
+        for (const wl of st.walls) {
+          if (segmentsIntersect(0, 0, rt.nx, rt.ny, wl.x1, wl.y1, wl.x2, wl.y2)) {
+            occ = true
+            break
+          }
+        }
+        if (occ !== rt.occluded) {
+          rt.occluded = occ
+          engine.setOcclusion(rt.id, occ ? 1 : 0)
+          if (rt.el) rt.el.dataset.occluded = occ ? '1' : '0'
+        }
 
         const lvl = playing ? engine.level(rt.id) : 0
         rt.level = lvl
@@ -129,30 +219,67 @@ export function Stage() {
         const d = Math.hypot(x, y)
         if (d > 30 && playing) {
           const g = fx.createLinearGradient(sx, sy, cx0, cy0)
-          g.addColorStop(0, hexA(rt.color, 0.05 + lvl * 0.4))
+          const a0 = (0.05 + lvl * 0.4) * (occ ? 0.35 : 1)
+          g.addColorStop(0, hexA(rt.color, a0))
           g.addColorStop(1, hexA(rt.color, 0))
           fx.strokeStyle = g
           fx.lineWidth = 1 + lvl * 2.5
+          fx.setLineDash(occ ? [3, 5] : [])
           fx.beginPath()
           fx.moveTo(sx, sy)
           fx.lineTo(cx0, cy0)
           fx.stroke()
-          const seed = hashId(rt.id)
-          for (let k = 0; k < 3; k++) {
-            const p = (t * (0.35 + seed * 0.2) + k / 3 + seed) % 1
-            const px = sx + (cx0 - sx) * p
-            const py = sy + (cy0 - sy) * p
-            fx.fillStyle = hexA(rt.color, (1 - p) * (0.15 + lvl * 0.8))
-            fx.beginPath()
-            fx.arc(px, py, 1.2 + lvl * 2, 0, Math.PI * 2)
-            fx.fill()
+          fx.setLineDash([])
+          if (!occ) {
+            const seed = hashId(rt.id)
+            for (let k = 0; k < 3; k++) {
+              const p = (t * (0.35 + seed * 0.2) + k / 3 + seed) % 1
+              fx.fillStyle = hexA(rt.color, (1 - p) * (0.15 + lvl * 0.8))
+              fx.beginPath()
+              fx.arc(sx + (cx0 - sx) * p, sy + (cy0 - sy) * p, 1.2 + lvl * 2, 0, Math.PI * 2)
+              fx.fill()
+            }
           }
         }
+
+        // ring feedback: the orb's ring glows locally around it, in time with its sound
+        const n = d / R
+        const ringIdx = ringAt(n)
+        if (ringIdx !== null && playing) {
+          ringEnergy[ringIdx] += lvl
+          const ang = Math.atan2(y, x)
+          const span = 0.18 + lvl * 0.55
+          fx.save()
+          fx.shadowColor = rt.color
+          fx.shadowBlur = 10 + lvl * 20
+          fx.strokeStyle = hexA(rt.color, 0.2 + lvl * 0.7)
+          fx.lineWidth = 1.5 + lvl * 3
+          fx.lineCap = 'round'
+          fx.beginPath()
+          fx.arc(cx0, cy0, RINGS[ringIdx] * R, ang - span, ang + span)
+          fx.stroke()
+          fx.restore()
+        }
+
+        // particles shed by the orb (droplets, embers, bubbles…)
+        const kind = SOUND_MAP[rt.soundId]?.particles
+        if (kind && playing && !orb.muted) rt.spawn = particles.emit(kind, sx, sy, 16, rt.color, lvl, dt, rt.spawn)
 
         // transient detection → emit a ripple
         const prev = lastLevel.get(rt.id) ?? 0
         if (lvl - prev > 0.07 && ripples.length < 40) ripples.push({ x: sx, y: sy, r: 30, a: Math.min(0.6, (lvl - prev) * 3), color: rt.color })
         lastLevel.set(rt.id, lvl)
+      }
+
+      // whole rings breathe with the energy of the orbs riding them
+      for (let i = 0; i < 3; i++) {
+        const e = Math.min(1, ringEnergy[i])
+        if (e < 0.02) continue
+        fx.strokeStyle = `rgba(255,255,255,${(e * 0.12).toFixed(3)})`
+        fx.lineWidth = 1 + e * 3
+        fx.beginPath()
+        fx.arc(cx0, cy0, RINGS[i] * R, 0, Math.PI * 2)
+        fx.stroke()
       }
 
       for (let i = ripples.length - 1; i >= 0; i--) {
@@ -169,42 +296,169 @@ export function Stage() {
         fx.arc(rp.x, rp.y, rp.r, 0, Math.PI * 2)
         fx.stroke()
       }
+      particles.draw(fx, dt, t)
 
       // listener aura reacts to the whole mix
-      const aura = fx.createRadialGradient(cx0, cy0, 0, cx0, cy0, 70 + master * 140)
+      const auraR = 70 + master * 140
+      const aura = fx.createRadialGradient(cx0, cy0, 0, cx0, cy0, auraR)
       aura.addColorStop(0, `rgba(255,255,255,${0.1 + master * 0.35})`)
       aura.addColorStop(1, 'rgba(255,255,255,0)')
       fx.fillStyle = aura
       fx.beginPath()
-      fx.arc(cx0, cy0, 70 + master * 140, 0, Math.PI * 2)
+      fx.arc(cx0, cy0, auraR, 0, Math.PI * 2)
       fx.fill()
 
-      // keep the store roughly in sync with orbiting positions (for persistence/sharing)
+      if (st.breathe) {
+        // breathing guide ring
+        const br = R * (0.18 + 0.08 * (b + 1))
+        fx.strokeStyle = 'rgba(199,210,254,0.55)'
+        fx.lineWidth = 2
+        fx.shadowColor = 'rgba(199,210,254,0.9)'
+        fx.shadowBlur = 18
+        fx.beginPath()
+        fx.arc(cx0, cy0, br, 0, Math.PI * 2)
+        fx.stroke()
+        fx.shadowBlur = 0
+      }
+
+      // keep the store roughly in sync with self-moving orbs (for persistence/sharing),
+      // without polluting undo history
       commitTimer += dt
-      if (st.orbit && commitTimer > 2) {
+      if (moved && commitTimer > 2) {
         commitTimer = 0
-        useStore.setState((s) => ({
-          orbs: s.orbs.map((o) => {
-            const rt = runtime.get(o.id)
-            return rt && !rt.dragging ? { ...o, x: rt.nx, y: rt.ny } : o
-          }),
-        }))
+        silently(() =>
+          useStore.setState((s) => ({
+            orbs: s.orbs.map((o) => {
+              const rt = runtime.get(o.id)
+              return rt && !rt.dragging && !rt.animating ? { ...o, x: rt.nx, y: rt.ny } : o
+            }),
+          })),
+        )
       }
     }
     raf = requestAnimationFrame(frame)
     return () => cancelAnimationFrame(raf)
+  }, [breathMV])
+
+  // ctrl/⌘ + wheel (and trackpad pinch) zooms the field — needs a non-passive listener
+  useEffect(() => {
+    const el = wrapRef.current!
+    const onWheel = (e: WheelEvent) => {
+      if (!e.ctrlKey && !e.metaKey) return
+      e.preventDefault()
+      const st = useStore.getState()
+      st.set('zoom', clampZoom(st.zoom * Math.exp(-e.deltaY * 0.004)))
+    }
+    el.addEventListener('wheel', onWheel, { passive: false })
+    return () => el.removeEventListener('wheel', onWheel)
   }, [])
 
-  const orbSize = Math.round(Math.max(46, Math.min(70, dims.r * 0.2)))
+  // ─── pointer gestures on empty space: lasso, path drawing, pinch / rotate ────
+  const pointers = useRef(new Map<number, { x: number; y: number }>())
+  const gesture = useRef<
+    | { kind: 'press'; x: number; y: number; additive: boolean }
+    | { kind: 'lasso'; pts: Pt[]; additive: boolean }
+    | { kind: 'draw'; pts: Pt[] }
+    | { kind: 'pinch'; d0: number; a0: number; zoom0: number; heading0: number }
+    | null
+  >(null)
+
+  const pinchInfo = () => {
+    const [p, q] = [...pointers.current.values()]
+    return { d: Math.hypot(q.x - p.x, q.y - p.y), a: Math.atan2(q.y - p.y, q.x - p.x) }
+  }
+
+  const onPointerDown = (e: React.PointerEvent) => {
+    pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY })
+    e.currentTarget.setPointerCapture(e.pointerId)
+    const st = useStore.getState()
+    if (pointers.current.size === 2) {
+      const { d, a } = pinchInfo()
+      gesture.current = { kind: 'pinch', d0: d, a0: a, zoom0: st.zoom, heading0: st.heading }
+      setLasso(null)
+      setDrawing(null)
+      return
+    }
+    if (st.drawPathFor) {
+      const pts: Pt[] = [toNorm(e.clientX, e.clientY)]
+      gesture.current = { kind: 'draw', pts }
+      setDrawing(pts)
+      return
+    }
+    gesture.current = { kind: 'press', x: e.clientX, y: e.clientY, additive: e.shiftKey || e.metaKey }
+  }
+
+  const onPointerMove = (e: React.PointerEvent) => {
+    if (tilt && e.pointerType === 'mouse') {
+      const rect = e.currentTarget.getBoundingClientRect()
+      rotX.set(24 - ((e.clientY - rect.top) / rect.height - 0.5) * 12)
+      rotY.set(((e.clientX - rect.left) / rect.width - 0.5) * 14)
+    }
+    if (!pointers.current.has(e.pointerId)) return
+    pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY })
+    const g = gesture.current
+    if (!g) return
+    if (g.kind === 'pinch' && pointers.current.size === 2) {
+      const { d, a } = pinchInfo()
+      const st = useStore.getState()
+      st.set('zoom', clampZoom(g.zoom0 * (d / g.d0)))
+      st.set('heading', g.heading0 + (a - g.a0))
+    } else if (g.kind === 'press' && Math.hypot(e.clientX - g.x, e.clientY - g.y) > 6) {
+      const pts: Pt[] = [toNorm(g.x, g.y), toNorm(e.clientX, e.clientY)]
+      gesture.current = { kind: 'lasso', pts, additive: g.additive }
+      setLasso(pts)
+    } else if (g.kind === 'lasso' || g.kind === 'draw') {
+      const p = toNorm(e.clientX, e.clientY)
+      const lastP = g.pts[g.pts.length - 1]
+      if (Math.hypot(p[0] - lastP[0], p[1] - lastP[1]) > 0.008) {
+        g.pts = [...g.pts, p]
+        if (g.kind === 'lasso') setLasso(g.pts)
+        else setDrawing(g.pts)
+      }
+    }
+  }
+
+  const onPointerUp = (e: React.PointerEvent) => {
+    pointers.current.delete(e.pointerId)
+    const g = gesture.current
+    const st = useStore.getState()
+    if (g?.kind === 'pinch') {
+      if (pointers.current.size === 0) gesture.current = null
+      return
+    }
+    gesture.current = null
+    if (!g) return
+    if (g.kind === 'press') {
+      st.select(null)
+    } else if (g.kind === 'lasso') {
+      setLasso(null)
+      const hits = [...runtime.values()].filter((rt) => inPolygon(rt.nx, rt.ny, g.pts)).map((rt) => rt.id)
+      const ids = g.additive ? [...new Set([...st.multi, ...hits])] : hits
+      st.setSelection(ids)
+      if (hits.length) haptic('soft')
+    } else if (g.kind === 'draw') {
+      setDrawing(null)
+      const id = st.drawPathFor
+      if (id && g.pts.length > 8) {
+        const pts = resampleLoop(g.pts.map(([x, y]) => clampToField(x, y)))
+        st.updateOrb(id, { path: { pts, speed: 2 } })
+        const rt = runtime.get(id)
+        if (rt) rt.pathT = 0
+        st.toast('Path set — the orb will travel this loop')
+        haptic('snap')
+      }
+      st.set('drawPathFor', null)
+    }
+  }
+
+  const orbSize = Math.round(Math.max(46, Math.min(70, dims.base * 0.2)))
 
   const onDrop = (e: React.DragEvent) => {
     e.preventDefault()
     setDropHover(false)
     const soundId = e.dataTransfer.getData('application/x-aether-sound')
     if (!SOUND_MAP[soundId]) return
-    const rect = wrapRef.current!.getBoundingClientRect()
-    let x = (e.clientX - rect.left - rect.width / 2) / dims.r
-    let y = (e.clientY - rect.top - rect.height / 2) / dims.r
+    let [x, y] = toNorm(e.clientX, e.clientY)
     const n = Math.hypot(x, y)
     if (n > 1) {
       x /= n
@@ -212,12 +466,15 @@ export function Stage() {
     }
     const ring = ringAt(Math.min(n, 1))
     if (ring !== null && n > 0) {
-      const k = RINGS[ring] / n
+      const k = RINGS[ring] / Math.min(n, 1)
       x *= k
       y *= k
+      haptic('snap')
     }
     useStore.getState().addOrb(soundId, { x, y })
   }
+
+  const drawName = drawPathFor ? SOUND_MAP[orbs.find((o) => o.id === drawPathFor)?.soundId ?? '']?.name : null
 
   return (
     <Glass
@@ -225,11 +482,22 @@ export function Stage() {
       initial={{ opacity: 0, scale: 0.94, y: 20 }}
       animate={{ opacity: 1, scale: 1, y: 0 }}
       transition={{ type: 'spring', stiffness: 120, damping: 20, delay: 0.1 }}
+      data-tour="stage"
     >
       <div
         ref={wrapRef}
-        className="absolute inset-0"
-        onPointerDown={() => useStore.getState().select(null)}
+        className="absolute inset-0 touch-none"
+        style={{ perspective: 1400, cursor: drawPathFor ? 'crosshair' : undefined }}
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={onPointerUp}
+        onPointerCancel={onPointerUp}
+        onPointerLeave={() => {
+          if (tilt) {
+            rotX.set(24)
+            rotY.set(0)
+          }
+        }}
         onDragOver={(e) => {
           if (e.dataTransfer.types.includes('application/x-aether-sound')) {
             e.preventDefault()
@@ -240,15 +508,22 @@ export function Stage() {
         onDragLeave={() => setDropHover(false)}
         onDrop={onDrop}
       >
-        <FieldGrid r={dims.r} magnet={magnet} dropHover={dropHover} />
-        <canvas ref={trailRef} className="pointer-events-none absolute inset-0 h-full w-full opacity-90 mix-blend-screen [filter:blur(2.5px)]" />
-        <canvas ref={fxRef} className="pointer-events-none absolute inset-0 h-full w-full mix-blend-screen" />
-        <Listener r={dims.r} />
-        <AnimatePresence>
-          {orbs.map((o) => (
-            <Orb key={o.id} orb={o} radius={dims.r} size={orbSize} />
-          ))}
-        </AnimatePresence>
+        <motion.div
+          className="absolute inset-0"
+          style={{ scale: breathMV, rotateX: rotX, rotateY: rotY, transformStyle: 'preserve-3d' }}
+        >
+          <FieldGrid r={r} magnet={magnet} dropHover={dropHover} />
+          <canvas ref={trailRef} className="pointer-events-none absolute inset-0 h-full w-full opacity-90 mix-blend-screen [filter:blur(2.5px)]" />
+          <canvas ref={fxRef} className="pointer-events-none absolute inset-0 h-full w-full mix-blend-screen" />
+          <PathsOverlay r={r} w={dims.w} h={dims.h} drawing={drawing} lasso={lasso} />
+          <Walls r={r} toNorm={toNorm} />
+          <Listener r={r} />
+          <AnimatePresence>
+            {orbs.map((o) => (
+              <Orb key={o.id} orb={o} radius={r} size={orbSize} />
+            ))}
+          </AnimatePresence>
+        </motion.div>
         <AnimatePresence>
           {orbs.length === 0 && (
             <motion.div
@@ -262,189 +537,59 @@ export function Stage() {
           )}
         </AnimatePresence>
       </div>
+
       <div className="pointer-events-none absolute left-6 top-5 hidden text-[10px] font-semibold uppercase tracking-[0.22em] text-white/35 sm:block">
         Spatial Field · {WORLD_RADIUS * 2}m
       </div>
+
+      <AnimatePresence>
+        {breathe && (
+          <motion.div
+            ref={breathTextRef}
+            initial={{ opacity: 0, y: 6 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0 }}
+            className="breath-word pointer-events-none absolute inset-x-0 top-6 text-center text-[13px] font-medium uppercase tracking-[0.3em] text-indigo-100/80"
+          >
+            Breathe in
+          </motion.div>
+        )}
+        {drawName && (
+          <motion.div
+            initial={{ opacity: 0, y: -8 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -8 }}
+            className="glass-chip absolute left-1/2 top-5 z-30 flex -translate-x-1/2 items-center gap-3 rounded-full py-1.5 pl-4 pr-1.5 text-[12.5px] font-medium text-white"
+          >
+            Draw a loop for {drawName}
+            <button
+              className="rounded-full bg-white/15 px-3 py-1 text-[12px] hover:bg-white/25"
+              onClick={() => useStore.getState().set('drawPathFor', null)}
+            >
+              Cancel
+            </button>
+          </motion.div>
+        )}
+        {zoom !== 1 && (
+          <motion.button
+            initial={{ opacity: 0, scale: 0.9 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.9 }}
+            onClick={() => useStore.getState().set('zoom', 1)}
+            className="glass-chip absolute bottom-5 right-6 z-30 rounded-full px-3 py-1.5 text-[11.5px] font-medium tabular-nums text-white/85 hover:text-white"
+          >
+            {Math.round(zoom * 100)}% · reset
+          </motion.button>
+        )}
+      </AnimatePresence>
     </Glass>
   )
 }
 
-function FieldGrid({ r, magnet, dropHover }: { r: number; magnet: number | null; dropHover: boolean }) {
-  const size = r * 2 + 40
-  const c = size / 2
-  return (
-    <svg
-      className="pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 overflow-visible"
-      width={size}
-      height={size}
-      aria-hidden
-    >
-      <defs>
-        <radialGradient id="fieldFill">
-          <stop offset="0" stopColor="rgba(255,255,255,0.07)" />
-          <stop offset="0.7" stopColor="rgba(255,255,255,0.02)" />
-          <stop offset="1" stopColor="rgba(255,255,255,0)" />
-        </radialGradient>
-      </defs>
-      <circle cx={c} cy={c} r={r * 1.02} fill="url(#fieldFill)" />
-      {/* crosshair */}
-      <line x1={c - r} y1={c} x2={c + r} y2={c} stroke="rgba(255,255,255,.05)" />
-      <line x1={c} y1={c - r} x2={c} y2={c + r} stroke="rgba(255,255,255,.05)" />
-      {/* compass ticks */}
-      {Array.from({ length: 72 }, (_, i) => {
-        const a = (i / 72) * Math.PI * 2
-        const major = i % 18 === 0
-        const r0 = r * 1.02 + 6
-        const r1 = r0 + (major ? 9 : 4)
-        return (
-          <line
-            key={i}
-            x1={c + Math.sin(a) * r0}
-            y1={c - Math.cos(a) * r0}
-            x2={c + Math.sin(a) * r1}
-            y2={c - Math.cos(a) * r1}
-            stroke={major ? 'rgba(255,255,255,.45)' : 'rgba(255,255,255,.14)'}
-            strokeWidth={major ? 1.5 : 1}
-            strokeLinecap="round"
-          />
-        )
-      })}
-      {RINGS.map((rr, i) => {
-        const active = magnet === i
-        return (
-          <g key={i}>
-            <motion.circle
-              cx={c}
-              cy={c}
-              r={rr * r}
-              fill="none"
-              strokeDasharray={i === 2 ? '2 7' : '1 5'}
-              strokeLinecap="round"
-              className={cx('ring-flow', `ring-flow-${i}`)}
-              animate={{
-                stroke: active ? 'rgba(255,255,255,0.95)' : dropHover ? 'rgba(255,255,255,0.5)' : 'rgba(255,255,255,0.3)',
-                strokeWidth: active ? 2.5 : 1.4,
-              }}
-              transition={{ type: 'spring', stiffness: 300, damping: 25 }}
-            />
-            <motion.circle
-              cx={c}
-              cy={c}
-              r={rr * r}
-              fill="none"
-              stroke="white"
-              animate={{ opacity: active ? 0.35 : 0, strokeWidth: active ? 14 : 4 }}
-              style={{ filter: 'blur(8px)' }}
-            />
-            <text
-              x={c}
-              y={c - rr * r - 7}
-              textAnchor="middle"
-              className="fill-white/35 text-[9px] font-semibold uppercase tracking-[0.2em]"
-            >
-              {RING_NAMES[i]} · {(rr * WORLD_RADIUS).toFixed(1)}m
-            </text>
-          </g>
-        )
-      })}
-    </svg>
-  )
-}
-
-/** The listener: you. Drag around it to turn your head; double-click to face forward. */
-function Listener({ r }: { r: number }) {
-  const heading = useStore((s) => s.heading)
-  const rot = useMotionValue(heading)
-  const deg = useTransform(rot, (v) => (v * 180) / Math.PI)
-  const dragging = useRef(false)
-  const size = Math.max(64, Math.min(88, r * 0.26))
-
-  useEffect(() => {
-    const unsub = rot.on('change', (v) => engine.setHeading(v))
-    return unsub
-  }, [rot])
-  useEffect(() => {
-    if (!dragging.current) animate(rot, heading, { type: 'spring', stiffness: 200, damping: 22 })
-  }, [heading, rot])
-
-  const angleFrom = (e: React.PointerEvent) => {
-    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
-    const dx = e.clientX - (rect.left + rect.width / 2)
-    const dy = e.clientY - (rect.top + rect.height / 2)
-    return Math.atan2(dx, -dy)
-  }
-  const startRef = useRef({ a: 0, h: 0 })
-
-  return (
-    <div className="absolute left-1/2 top-1/2 z-10" style={{ width: 0, height: 0 }}>
-      {/* hearing cone */}
-      <motion.div
-        className="pointer-events-none absolute"
-        style={{
-          width: r * 1.3,
-          height: r * 1.3,
-          left: -r * 0.65,
-          top: -r * 0.65,
-          rotate: deg,
-          background:
-            'conic-gradient(from -50deg, rgba(255,255,255,0.10), rgba(255,255,255,0) 100deg, rgba(255,255,255,0) 360deg)',
-          WebkitMaskImage: 'radial-gradient(circle, black 0%, transparent 70%)',
-          maskImage: 'radial-gradient(circle, black 0%, transparent 70%)',
-          borderRadius: '50%',
-        }}
-      />
-      <motion.div
-        role="slider"
-        aria-label="Listener heading"
-        aria-valuenow={Math.round((heading * 180) / Math.PI)}
-        tabIndex={0}
-        className="listener group absolute grid cursor-grab touch-none place-items-center rounded-full active:cursor-grabbing"
-        style={{ width: size, height: size, left: -size / 2, top: -size / 2 }}
-        whileHover={{ scale: 1.05 }}
-        whileTap={{ scale: 0.97 }}
-        onPointerDown={(e) => {
-          e.stopPropagation()
-          e.currentTarget.setPointerCapture(e.pointerId)
-          dragging.current = true
-          startRef.current = { a: angleFrom(e), h: rot.get() }
-        }}
-        onPointerMove={(e) => {
-          if (!dragging.current) return
-          rot.set(startRef.current.h + (angleFrom(e) - startRef.current.a))
-        }}
-        onPointerUp={() => {
-          dragging.current = false
-          const h = Math.atan2(Math.sin(rot.get()), Math.cos(rot.get()))
-          rot.set(h)
-          useStore.getState().set('heading', h)
-        }}
-        onDoubleClick={() => useStore.getState().set('heading', 0)}
-        onKeyDown={(e) => {
-          if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
-            e.preventDefault()
-            e.stopPropagation()
-            useStore.getState().set('heading', heading + (e.key === 'ArrowLeft' ? -0.2 : 0.2))
-          }
-        }}
-      >
-        <div className="listener-pulse" />
-        <motion.svg viewBox="0 0 48 48" width={size * 0.56} height={size * 0.56} style={{ rotate: deg }} aria-hidden>
-          {/* top-down head: ears, face and a nose pointing where you're facing */}
-          <ellipse cx="9" cy="25" rx="3.2" ry="5.5" fill="rgba(255,255,255,.75)" />
-          <ellipse cx="39" cy="25" rx="3.2" ry="5.5" fill="rgba(255,255,255,.75)" />
-          <circle cx="24" cy="25" r="14" fill="url(#headGrad)" />
-          <path d="M24 5 L28.5 13 L19.5 13 Z" fill="white" />
-          <defs>
-            <radialGradient id="headGrad" cx="40%" cy="35%">
-              <stop offset="0" stopColor="#fff" />
-              <stop offset="1" stopColor="#c7d2fe" />
-            </radialGradient>
-          </defs>
-        </motion.svg>
-        <span className="tooltip !top-[calc(100%+12px)] !bottom-auto">Drag to turn your head</span>
-      </motion.div>
-    </div>
-  )
+const clampZoom = (z: number) => Math.min(1.6, Math.max(0.6, z))
+const clampToField = (x: number, y: number): Pt => {
+  const n = Math.hypot(x, y)
+  return n > 1 ? [x / n, y / n] : [x, y]
 }
 
 const hashId = (s: string) => {

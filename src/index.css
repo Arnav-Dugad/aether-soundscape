@@ -277,3 +277,228 @@
     animation: none;
   }
 }
+
+/* ───────────── Orb extras ───────────── */
+.orb-shadow {
+  position: absolute;
+  left: 12%;
+  right: 12%;
+  bottom: -6px;
+  height: 22%;
+  border-radius: 50%;
+  background: radial-gradient(closest-side, rgba(0, 0, 0, 0.55), transparent);
+  filter: blur(4px);
+  pointer-events: none;
+  transition:
+    transform 0.4s cubic-bezier(0.2, 0.8, 0.2, 1),
+    opacity 0.4s;
+}
+.orb[data-occluded='1'] .orb-core {
+  filter: saturate(0.5) brightness(0.8);
+}
+.orb[data-occluded='1'] .orb-glow {
+  opacity: calc(0.12 + var(--lvl) * 0.3);
+}
+/* real refraction: the backdrop bends through the glass (Chromium) */
+.can-refract .orb-core.refract {
+  backdrop-filter: url(#orb-refract) saturate(170%);
+  background:
+    radial-gradient(circle at 32% 26%, rgba(255, 255, 255, 0.85) 0%, rgba(255, 255, 255, 0) 28%),
+    radial-gradient(circle at 50% 55%, color-mix(in srgb, var(--c0) 45%, transparent) 0%, color-mix(in srgb, var(--c1) 70%, transparent) 75%, color-mix(in srgb, var(--c1) 55%, black) 100%);
+}
+
+/* living icons — amplitude follows each orb's audio level */
+.icon-fall,
+.icon-drip {
+  animation: icon-fall 1.4s ease-in-out infinite;
+}
+.icon-flicker {
+  animation: icon-flicker 0.35s steps(2) infinite alternate;
+  transform-origin: 50% 90%;
+}
+.icon-sway {
+  animation: icon-sway 2.6s ease-in-out infinite;
+  transform-origin: 50% 100%;
+}
+.icon-bob {
+  animation: icon-bob 2.4s ease-in-out infinite;
+}
+.icon-flap {
+  animation: icon-flap 0.6s ease-in-out infinite;
+}
+.icon-swing {
+  animation: icon-swing 2.2s ease-in-out infinite;
+  transform-origin: 50% 0%;
+}
+.icon-tick {
+  animation: icon-tick 2s steps(2) infinite;
+}
+.icon-spin {
+  animation: spin calc(6s - var(--lvl, 0) * 4s) linear infinite;
+}
+.icon-bounce {
+  animation: icon-bounce 0.83s cubic-bezier(0.3, 0, 0.3, 1) infinite;
+}
+.icon-shake {
+  animation: icon-shake 0.18s linear infinite;
+}
+.icon-pulse,
+.icon-breathe {
+  animation: icon-pulse 3s ease-in-out infinite;
+}
+.icon-tap {
+  animation: icon-tap 0.3s ease-in-out infinite;
+}
+@keyframes icon-fall {
+  0%, 100% { transform: translateY(calc(-1px - var(--lvl, 0) * 3px)); }
+  50% { transform: translateY(calc(1px + var(--lvl, 0) * 3px)); }
+}
+@keyframes icon-flicker {
+  from { transform: scale(1, 1) skewX(-2deg); }
+  to { transform: scale(calc(1 - var(--lvl, 0) * 0.08), calc(1.04 + var(--lvl, 0) * 0.12)) skewX(3deg); }
+}
+@keyframes icon-sway {
+  0%, 100% { transform: rotate(calc(-3deg - var(--lvl, 0) * 8deg)); }
+  50% { transform: rotate(calc(3deg + var(--lvl, 0) * 8deg)); }
+}
+@keyframes icon-bob {
+  0%, 100% { transform: translateY(-1.5px) rotate(-2deg); }
+  50% { transform: translateY(1.5px) rotate(2deg); }
+}
+@keyframes icon-flap {
+  0%, 100% { transform: scaleY(1); }
+  50% { transform: scaleY(calc(0.92 - var(--lvl, 0) * 0.15)); }
+}
+@keyframes icon-swing {
+  0%, 100% { transform: rotate(calc(-4deg - var(--lvl, 0) * 10deg)); }
+  50% { transform: rotate(calc(4deg + var(--lvl, 0) * 10deg)); }
+}
+@keyframes icon-tick {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(12deg); }
+}
+@keyframes icon-bounce {
+  0%, 100% { transform: translateY(0) scale(1); }
+  40% { transform: translateY(calc(-1.5px - var(--lvl, 0) * 3px)) scale(1.04); }
+}
+@keyframes icon-shake {
+  0%, 100% { transform: translate(0, 0); }
+  25% { transform: translate(calc(var(--lvl, 0) * 1.4px), calc(var(--lvl, 0) * -1px)); }
+  75% { transform: translate(calc(var(--lvl, 0) * -1.4px), calc(var(--lvl, 0) * 1px)); }
+}
+@keyframes icon-pulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(calc(1.06 + var(--lvl, 0) * 0.08)); }
+}
+@keyframes icon-tap {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(calc(var(--lvl, 0) * 2.5px)); }
+}
+
+/* ───────────── Walls & paths ───────────── */
+.wall {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.4), rgba(255, 255, 255, 0.12));
+  backdrop-filter: blur(10px) saturate(160%);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.6),
+    0 0 0 1px rgba(255, 255, 255, 0.2),
+    0 8px 24px -6px rgba(0, 0, 0, 0.6),
+    0 0 24px rgba(165, 180, 252, 0.25);
+}
+.wall-selected {
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.7),
+    0 0 0 1.5px rgba(255, 255, 255, 0.85),
+    0 0 30px rgba(199, 210, 254, 0.6);
+}
+.wall-handle {
+  width: 18px;
+  height: 18px;
+  cursor: grab;
+  background: white;
+  box-shadow:
+    0 0 0 3px rgba(255, 255, 255, 0.25),
+    0 2px 8px rgba(0, 0, 0, 0.5);
+  transition: opacity 0.2s;
+}
+.path-flow {
+  animation: ring-flow 12s linear infinite;
+}
+
+/* ───────────── AI ───────────── */
+.ai-btn {
+  background: conic-gradient(from var(--ai-angle, 0deg), #a78bfa, #f472b6, #fbbf24, #34d399, #60a5fa, #a78bfa);
+  animation: ai-rotate 6s linear infinite;
+  box-shadow:
+    inset 0 0 0 2px rgba(255, 255, 255, 0.35),
+    0 0 22px rgba(167, 139, 250, 0.55);
+}
+.ai-btn > svg {
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.4));
+}
+@property --ai-angle {
+  syntax: '<angle>';
+  initial-value: 0deg;
+  inherits: false;
+}
+@keyframes ai-rotate {
+  to {
+    --ai-angle: 360deg;
+  }
+}
+.ai-aurora {
+  background:
+    radial-gradient(40% 50% at 15% 10%, rgba(167, 139, 250, 0.35), transparent 70%),
+    radial-gradient(40% 50% at 90% 20%, rgba(244, 114, 182, 0.25), transparent 70%),
+    radial-gradient(50% 50% at 50% 110%, rgba(96, 165, 250, 0.25), transparent 70%);
+  filter: blur(20px);
+  animation: aurora 12s ease-in-out infinite alternate;
+}
+@keyframes aurora {
+  to {
+    transform: translate(20px, -10px) rotate(6deg) scale(1.05);
+  }
+}
+.shimmer-text {
+  background: linear-gradient(90deg, rgba(255, 255, 255, 0.35), #fff, rgba(255, 255, 255, 0.35));
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: shimmer 1.6s linear infinite;
+}
+@keyframes shimmer {
+  to {
+    background-position: -200% 0;
+  }
+}
+
+/* ───────────── Tour ───────────── */
+.tour-spot {
+  box-shadow:
+    0 0 0 9999px rgba(3, 3, 10, 0.68),
+    0 0 0 2px rgba(255, 255, 255, 0.55),
+    0 0 40px rgba(199, 210, 254, 0.45);
+  pointer-events: none;
+}
+.breath-word {
+  text-shadow: 0 0 20px rgba(199, 210, 254, 0.7);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [class*='icon-'],
+  .ai-btn,
+  .ai-aurora,
+  .path-flow {
+    animation: none !important;
+  }
+}
+
+/* small screens: the dock scrolls sideways — fade its trailing edge as a hint */
+@media (max-width: 1079px) {
+  .dock-scroll {
+    -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 36px), transparent);
+    mask-image: linear-gradient(to right, #000 calc(100% - 36px), transparent);
+    padding-right: 28px;
+  }
+}

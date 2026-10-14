@@ -142,7 +142,8 @@ export function burst(
   const src = ctx.createBufferSource()
   src.buffer = kit.click
   src.playbackRate.value = opts.rate ?? 1
-  const g = ctx.createGain()
+  // start silent: a fractional-sample source start could otherwise leak one full-scale sample
+  const g = gain(ctx, 0)
   const a = opts.attack ?? 0.0005
   g.gain.setValueAtTime(0, t)
   g.gain.linearRampToValueAtTime(opts.amp, t + a)
@@ -167,7 +168,7 @@ export function tone(
   o.type = opts.type ?? 'sine'
   o.frequency.setValueAtTime(opts.freq, t)
   if (opts.detune) o.detune.value = opts.detune
-  const g = ctx.createGain()
+  const g = gain(ctx, 0)
   const a = opts.attack ?? 0.003
   g.gain.setValueAtTime(0, t)
   g.gain.linearRampToValueAtTime(opts.amp, t + a)
