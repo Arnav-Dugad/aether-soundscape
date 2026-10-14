@@ -5,3 +5,8 @@ dist
 .DS_Store
 .playwright-mcp
 *.tsbuildinfo
+
+.dev.vars*
+!.dev.vars.example
+.env*
+!.env.example
