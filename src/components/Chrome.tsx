@@ -6,6 +6,8 @@ import { CREDITS } from '../audio/credits'
 import { useStore } from '../store'
 import { Glass, IconButton, Kbd, spring } from './ui'
 
+export const VERSION = 'v2.0.1'
+
 /** Animated brand mark: a tiny orbiting system. */
 export function LogoMark({ size = 34 }: { size?: number }) {
   return (
@@ -305,6 +307,7 @@ export function HelpSheet() {
                 </li>
               ))}
             </ul>
+            <p className="mt-6 text-[10.5px] text-white/30">Aether {VERSION}</p>
           </Glass>
         </motion.div>
       )}

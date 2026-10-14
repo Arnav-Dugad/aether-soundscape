@@ -35,6 +35,12 @@ export default {
   async fetch(req: Request, env: Env): Promise<Response> {
     const url = new URL(req.url)
     if (url.pathname.startsWith('/api/openai/')) return proxyOpenAI(req, url)
-    return env.ASSETS.fetch(req)
+    const res = await env.ASSETS.fetch(req)
+    // A missing hashed asset must 404 — never fall back to index.html, which would be cached as
+    // "immutable" under the asset's URL and break the page for that visitor until the next deploy.
+    if (url.pathname.startsWith('/assets/') && (res.headers.get('Content-Type') ?? '').includes('text/html')) {
+      return new Response('Not found', { status: 404, headers: { 'Cache-Control': 'no-store' } })
+    }
+    return res
   },
 }
