@@ -1,5 +1,7 @@
 # Aether — Spatial Ambient Soundscape Mixer
 
+**Live:** https://aether-soundscape.arnavrival12.workers.dev
+
 A floating, visionOS-inspired audio workspace. Drag glowing, translucent sound orbs closer to or further from the listener at the centre to mix 3D spatial audio in real time.
 
 **Every sound is synthesised live in the browser** with the Web Audio API. There are no audio files. That makes 24 generators that never loop the same way twice.
@@ -37,7 +39,7 @@ React 19 · TypeScript · Vite · Tailwind CSS v4 · Framer Motion · Zustand ·
 npm install
 npm run dev      # local dev server
 npm run build    # production build → dist/
-npm run deploy   # build + deploy to Cloudflare Pages
+npm run deploy   # build + deploy to Cloudflare (Workers static assets)
 ```
 
 ## Architecture
